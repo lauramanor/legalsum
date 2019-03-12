@@ -9,7 +9,7 @@ import pandas as pd
 import pytextrank
 
 
-nlp = spacy.load('en_core_web_sm')
+# nlp = spacy.load('en_core_web_sm')
 logging.basicConfig(level=logging.DEBUG)
 
 
@@ -22,15 +22,18 @@ def print_scores(scores):
 
 if __name__ == '__main__':
     data = Summaries(['tldrlegal','tosdr_annotated'])
-    print_scores(data.textrank())
-    print_scores(data.textrank(use_spacy=True))
+    data.get_metrics()
+    # print_scores(data.firstsent())
+    # print_scores(data.firstsent(use_spacy=True))
+    #
+    #
+    # data = Summaries(['tosdr_annotated'])
+    # print_scores(data.firstsent())
+    # print_scores(data.firstsent(use_spacy=True))
 
 
-    data = Summaries(['tosdr_annotated'])
-    print_scores(data.textrank())
-    print_scores(data.textrank(use_spacy=True))
+    # data = Summaries(['tldrlegal'])
 
-
-    data = Summaries(['tldrlegal'])
-    print_scores(data.textrank())
-    print_scores(data.textrank(use_spacy=True))
+    # print_scores(data.firstsent())
+    # print_scores(data.firstsent(use_spacy=True))
+    data.log_odds_ratio()
