@@ -110,6 +110,7 @@ class Summaries():
 
     def __init__(self, loads=[]):
         self.mean_ntokens = []
+        self.max_ntokens = int()
 
         self.items = []
         self.dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -134,6 +135,7 @@ class Summaries():
             if item.ref:
                 ntokens.append(item.ref.ntokens)
 
+        self.max_ntokens = max(ntokens)
         self.mean_ntokens = statistics.mean(ntokens)
 
     def check_dir(self, check=None):
@@ -154,21 +156,30 @@ class Summaries():
         for item in self.items:
             if item.ref:
 
-                if item.quote.nsents <= 1:
+                if item.quote.ntokens <= self.mean_ntokens or \
+                        item.quote.nsents == 1:
                     hypes.append(item.quote.clean)
                     refs.append(item.ref.clean)
                     refs_dirty.append(item.ref.original)
                     # print(item.quote.clean)
                 else:
-                    for x in range(2, 11):
-                        ratio = x * .1
-                        hyp = summarize("\n ".join(item.quote.sents), ratio)
+                    # for x in range(2, 11):
+                    #     ratio = x * .1
+                    hyp = summarize("\n ".join(item.quote.sents), words=self.mean_ntokens)
+                    if len(hyp) > 0:
+                        hypes.append(hyp)
+                        refs.append(item.ref.clean)
+                        refs_dirty.append(item.ref.original)
+                    elif item.quote.ntokens/item.quote.nsents > self.mean_ntokens:
+                        hyp = summarize("\n ".join(item.quote.sents), words=self.max_ntokens)
                         if len(hyp) > 0:
                             hypes.append(hyp)
                             refs.append(item.ref.clean)
                             refs_dirty.append(item.ref.original)
+                    else:
+                        print(f"No summary for {item.uid} | {int(item.quote.ntokens/item.quote.nsents)}\t| {item.quote.clean}")
 
-                            break
+                            # break
 
         return rouge.get_scores(hypes, refs, avg=True)
 
@@ -447,6 +458,9 @@ class Summaries():
             summary_counts += sentences[idx_max]
             summary_ntokens += idx_ntokens
             # print(summary_counts)
+
+        if summary_ntokens is 0:
+            print(f"No summary for {item.uid} | {int(item.quote.ntokens / item.quote.nsents)}\t| {item.quote.clean}")
 
         return summary_idx
 
