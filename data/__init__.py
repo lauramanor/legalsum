@@ -2,7 +2,7 @@ import os.path
 from os import walk
 import json
 import logging
-
+from scipy.stats import entropy as kl
 import pandas as pd
 import numpy as np
 import math
@@ -28,7 +28,7 @@ from readability_score.calculators.ari import *
 from readability_score.calculators.linsearwrite import *
 from readability_score.calculators.flesch import *
 from scipy import stats
-
+from sklearn.feature_extraction.text import CountVectorizer
 
 # from ./readability-score-master import readability-score as rs
 
@@ -74,7 +74,7 @@ def num_unique(ref, quote):
     return unique_count
 
 
-def readability_scores(text):
+def readability_scores(text, sents=False):
     """
     https://github.com/wimmuskee/readability-score
 
@@ -89,13 +89,16 @@ def readability_scores(text):
     """
     scores = {}
     scores["fk"] = FleschKincaid(text, locale='en_US').min_age
-    # scores["cl"] = ColemanLiau(text, locale='en_US').min_age
     # scores["dc"] = DaleChall(text, locale='en_US').min_age
     scores["smog"] = SMOG(text, locale='en_US').min_age
     scores["ari"] = ARI(text, locale='en_US').min_age
     # scores["lw"] = LinsearWrite(text, locale='en_US').min_age
     # scores["fl"] = Flesch(text, locale='en_US').min_age # no min age!
-    scores["ave"] = int(sum(scores.values())/3)
+    if sents:
+        scores["cl"] = ColemanLiau(text, locale='en_US').min_age
+        scores["ave"] = int(sum(scores.values()) / 4)
+    else:
+        scores["ave"] = int(sum(scores.values()) / 3)
 
     return scores
 
@@ -184,23 +187,23 @@ class Summaries():
 
         # sentence and word counts
 
-        quote_sentence_counts_nltk = []
+        quote_sentence_counts = []
         quote_word_counts = []
 
-        ref_sentence_counts_nltk = []
+        ref_sentence_counts = []
         ref_word_counts = []
 
         unique_ngram_counts = np.empty((0, 4))
         ref_ngram_counts = np.empty((0, 4))
 
-        unique_sentences_counts_nltk = []
+        unique_sentences_counts = []
 
         for item in self.items:
             if item.ref:
-                quote_sentence_counts_nltk.append(item.quote.nsents())
+                quote_sentence_counts.append(item.quote.nsents())
                 quote_word_counts.append(item.quote.ntokens)
 
-                ref_sentence_counts_nltk.append(item.ref.nsents())
+                ref_sentence_counts.append(item.ref.nsents())
                 ref_word_counts.append(item.ref.ntokens)
 
                 temp_unique = []
@@ -212,7 +215,7 @@ class Summaries():
                 unique_ngram_counts = np.vstack((unique_ngram_counts, temp_unique))
                 ref_ngram_counts = np.vstack((ref_ngram_counts, temp_ref))
 
-                unique_sentences_counts_nltk.append(num_unique(ref=item.ref.sents(), quote=item.quote.sents()))
+                unique_sentences_counts.append(num_unique(ref=item.ref.sents(), quote=item.quote.sents()))
 
                 if item.ref.ntokens/item.quote.ntokens > 2:
                     print(f'\t {item.ref.ntokens} : {item.ref} \n {item.quote.ntokens} {item.quote} \n ')
@@ -221,24 +224,22 @@ class Summaries():
 
         print(pd.DataFrame(ref_word_counts).describe())
 
-        sents_ratio_micro_nltk = sum(ref_sentence_counts_nltk) / sum(quote_sentence_counts_nltk)
+        sents_ratio_micro = sum(ref_sentence_counts) / sum(quote_sentence_counts)
         words_ratio_micro = sum(ref_word_counts) / sum(quote_word_counts)
         unique_ngrams_ratios_micro = sum(unique_ngram_counts) / sum(ref_ngram_counts)
         unique_ratio_array_test = safe_div_array(unique_ngram_counts, ref_ngram_counts)
         unique_ngrams_ratios_macro = sum(safe_div_array(unique_ngram_counts, ref_ngram_counts)) / \
                                      np.shape(unique_ngram_counts)[0]
 
-        unique_sentence_ratio_micro_nltk = sum(unique_sentences_counts_nltk) / sum(quote_sentence_counts_nltk)
+        unique_sentence_ratio_micro = sum(unique_sentences_counts) / sum(quote_sentence_counts)
 
         words_ratio = np.divide(ref_word_counts, quote_word_counts)
-        sents_ratio_nltk = safe_div_array(ref_sentence_counts_nltk, quote_sentence_counts_nltk)
-        unique_sents_ratio_nltk = safe_div_array(unique_sentences_counts_nltk, ref_sentence_counts_nltk)
-
-
+        sents_ratio = safe_div_array(ref_sentence_counts, quote_sentence_counts)
+        unique_sents_ratio = safe_div_array(unique_sentences_counts, ref_sentence_counts)
 
         words_ratio_macro = sum(words_ratio) / len(words_ratio)
-        sents_ratio_macro_nltk = sum(sents_ratio_nltk) / len(sents_ratio_nltk)
-        unique_sents_ratio_macro_nltk = sum(unique_sents_ratio_nltk) / len(unique_sents_ratio_nltk)
+        sents_ratio_macro = sum(sents_ratio) / len(sents_ratio)
+        unique_sents_ratio_macro = sum(unique_sents_ratio) / len(unique_sents_ratio)
 
         #
         # fig1, ax1 = plt.subplots()
@@ -248,7 +249,7 @@ class Summaries():
         #
         # fig2, ax2 = plt.subplots()
         #
-        # ax2.boxplot([quote_sentence_counts_nltk, ref_sentence_counts_nltk], showfliers=False)
+        # ax2.boxplot([quote_sentence_counts, ref_sentence_counts], showfliers=False)
         # ax2.set_title('Sentence Counts')
         # ax2.set_xticklabels(['Original Text', 'Reference'])
         # fig2.show()
@@ -390,12 +391,12 @@ class Summaries():
         quote_scores = []
         for item in self.items:
             if item.ref: #ski
-                ref_scores.append(readability_scores(item.ref.clean))
-                quote_scores.append(readability_scores(item.quote.clean))
-        print("\n Reference Scores")
-        print(pd.DataFrame(ref_scores).describe())
-        print("\n Quote Scores")
-        print(pd.DataFrame(quote_scores).describe())
+                ref_scores.append(readability_scores(item.ref.clean, sents=True))
+                quote_scores.append(readability_scores(item.quote.clean, sents=True))
+        print("\n Reference Readability Scores")
+        print(pd.DataFrame(ref_scores).mean())
+        print("\n Quote Readability Scores")
+        print(pd.DataFrame(quote_scores).mean())
 
     def greedy_kl(self):
         """ Runs greedy KL on the documents"""
@@ -406,23 +407,49 @@ class Summaries():
         refs_dirty = []
         for item in self.items:
             if item.ref:
-                refs.append(item.ref.clean)
+                refs.append(item.ref.clean.lower())
                 #average len of words is 17.3 --
                 if item.quote.ntokens <= self.mean_ntokens:
-                    hypes.append(item.quote)
+                    hypes.append(item.quote.clean.lower())
                 else:
-                    lemmas_by_sentence = item.quote.get_lemmas()
-                    # dist_full_text:
-                    #get distribution for quote
-                    #get distribution for each sentence for each quote
-                    #rank sentences using scipy.stats.entropy(quote, sent)
-
-
-
-
-
+                    hypes.append(" ".join(item.quote.sents[x].lower() for x in self.get_kl_indexes(item=item)))
+                    pass
 
         return rouge.get_scores(hypes, refs, avg=True)
+
+    def get_kl_indexes(self, item):
+        sentences = item.quote.get_lemmas()
+        ntokens = item.quote._ntokens_by_sentence
+        full_text = sum(sentences, Counter())
+        full_text_nwords = sum(full_text.values())
+        full_text_dist = [(full_text[key] + 1) / (full_text_nwords + len(full_text.keys())) for key in full_text.keys()]
+
+        summary_idx = []
+        summary_ntokens = 0
+        summary_counts = Counter()
+
+        while summary_ntokens < self.mean_ntokens:
+            current_scores = np.ones((len(sentences)))
+            for idx, lemmas in enumerate(sentences):
+                if idx not in summary_idx:
+                    if summary_ntokens > 0:
+                        lemmas = summary_counts + lemmas
+                    dist = [(lemmas[key] + 1) / (sum(lemmas.values()) + len(full_text.keys())) for key in
+                            full_text.keys()]
+                    current_scores[idx] = kl(full_text_dist, dist)
+
+            idx_max = np.argmin(current_scores)
+            idx_ntokens = ntokens[idx_max]
+            if summary_ntokens > 0 and \
+                    abs(self.mean_ntokens - summary_ntokens - idx_ntokens) > abs(self.mean_ntokens - summary_ntokens):
+                return summary_idx
+            summary_idx.append(idx_max)
+            summary_counts += sentences[idx_max]
+            summary_ntokens += idx_ntokens
+            # print(summary_counts)
+
+        return summary_idx
+
 
 
 class Summary:
@@ -459,7 +486,7 @@ class Document:
         return self.clean
 
     def __init__(self, parent, text, code=None):
-        self.parent = parent
+        # self.parent = parent
         self.original = text
         self.clean = self.clean_text()
 
@@ -472,6 +499,7 @@ class Document:
         self.ngrams = self.get_ngrams()
 
         self._lemmas_by_sentence = None
+        self._ntokens_by_sentence = None
 
         self.code = code
 
@@ -482,17 +510,48 @@ class Document:
         :return: remove spaces, remove n,
         edit some periods, and spacing around the periods
         """
-        text = self.original
+        text = self.original.replace('&nbsp', ' ')
+
+        https = "https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)"
+        indexes = []
+        text = re.sub(https, "", text)
+
         # print(text)
         for match in re.finditer("\.”", text):
             index = match.start()
             text = text[:index] + "”." + text[index + 2:]
 
-        for match in re.finditer("[a-z]\.[A-Z]", text):
-            index = match.start()
+        indexes = []
+        for match in re.finditer("[a-z][\.][A-Z]", text):
+            indexes.append(match.start())
+        for index in reversed(indexes):
             text = text[:index + 2] + " " + text[index + 2:]
+            pass
 
-        return text.replace('&nbsp', ' ').replace('\n', ' ')
+        indexes = []
+        for match in re.finditer("\S[,:;][a-z]", text):
+            indexes.append(match.start())
+        for index in reversed(indexes):
+            text = text[:index + 2] + " " + text[index + 2:]
+            pass
+
+        indexes = []
+        for match in re.finditer("-\n[a-z]", text):
+            indexes.append(match.start())
+        for index in reversed(indexes):
+            text = text[:index] + text[index + 2:]
+            #TODO: does this work?
+            pass
+
+        indexes = []
+        for match in re.finditer("[a-z]\n[A-Z]", text):
+            indexes.append(match.start())
+        for index in reversed(indexes):
+            text = text[:index+1] + ". " + text[index + 2:]
+            #TODO: does this work?
+            pass
+
+        return text.replace('\n', ' ')
 
 
 
@@ -502,10 +561,12 @@ class Document:
         """
         if not self._lemmas_by_sentence:
             lemmatize = WordNetLemmatizer()
-            all = []
+            all_lemmas = []
+            nwords_by_sents = []
             for sentence in self.sents:
-                lemmas = []
+                lemmas = Counter()
                 tokens = word_tokenize(sentence)
+                nwords_by_sents.append(len(tokens))
                 for word, pos in nltk.pos_tag(tokens):
                     if word.isalpha():
                         if get_wordnet_pos(pos):
@@ -514,15 +575,16 @@ class Document:
                             lemma = lemmatize.lemmatize(word.lower())
                         if lemma not in stopwords.words('english'):
                             if lemma is "cooky" and word is "cookies":
-                                    lemmas.append("cookies")
+                                    lemmas["cookies"] += 1
                             elif lemma is not "u":
-                                lemmas.append(lemma)
-                all.append(lemmas)
-            self._lemmas_by_sentence = all
+                                lemmas[lemma] += 1
+                all_lemmas.append(lemmas)
+            self._ntokens_by_sentence = nwords_by_sents
+            self._lemmas_by_sentence = all_lemmas
 
         return self._lemmas_by_sentence
 
-    def get_sentences(self, text=None, ):
+    def get_sentences(self, text=None):
 
         if not text:
             text = self.clean
