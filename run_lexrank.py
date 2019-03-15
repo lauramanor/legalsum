@@ -22,7 +22,8 @@ def print_scores(scores):
 
 if __name__ == '__main__':
     data = Summaries(['tldrlegal','tosdr_annotated'])
-    data.get_metrics()
+    data.greedy_kl()
+    # data.get_metrics()
     # print_scores(data.firstsent())
     # print_scores(data.firstsent(use_spacy=True))
     #
@@ -36,4 +37,5 @@ if __name__ == '__main__':
 
     # print_scores(data.firstsent())
     # print_scores(data.firstsent(use_spacy=True))
+    # data.readibility_score()
     data.log_odds_ratio()

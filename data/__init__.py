@@ -10,7 +10,6 @@ import csv
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk import ngrams
-import spacy
 import re
 from summa.summarizer import summarize
 from rouge import Rouge
@@ -21,6 +20,15 @@ from collections import Counter
 import statistics
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
+from readability_score.calculators.fleschkincaid import *
+from readability_score.calculators.colemanliau import *
+from readability_score.calculators.dalechall import *
+from readability_score.calculators.smog import *
+from readability_score.calculators.ari import *
+from readability_score.calculators.linsearwrite import *
+from readability_score.calculators.flesch import *
+from scipy import stats
+
 
 # from ./readability-score-master import readability-score as rs
 
@@ -28,7 +36,6 @@ plt.style.use('seaborn-colorblind')
 # plt.rcParams.update(IPython_default)
 
 logging.basicConfig(level=logging.DEBUG)
-nlp = spacy.load('en_core_web_sm')
 rouge = Rouge()
 
 
@@ -67,6 +74,31 @@ def num_unique(ref, quote):
     return unique_count
 
 
+def readability_scores(text):
+    """
+    https://github.com/wimmuskee/readability-score
+
+     - Flesch-Kincaid fleschkincaid.FleschKincaid()
+     - Coleman-Liau colemanliau.ColemanLiau()
+     - Dale-Chall dalechall.DaleChall()
+     - SMOG smog.SMOG()
+     - Automated Readability Index ari.ARI()
+     - LinsearWrite linsearwrite.LinsearWrite()
+
+    :return:
+    """
+    scores = {}
+    scores["fk"] = FleschKincaid(text, locale='en_US').min_age
+    # scores["cl"] = ColemanLiau(text, locale='en_US').min_age
+    # scores["dc"] = DaleChall(text, locale='en_US').min_age
+    scores["smog"] = SMOG(text, locale='en_US').min_age
+    scores["ari"] = ARI(text, locale='en_US').min_age
+    # scores["lw"] = LinsearWrite(text, locale='en_US').min_age
+    # scores["fl"] = Flesch(text, locale='en_US').min_age # no min age!
+    scores["ave"] = int(sum(scores.values())/3)
+
+    return scores
+
 class Summaries():
     # tosdr_annotated code guide
     annotations = ["1", "2", "3", "s", "j", "d", "o", "q"]
@@ -74,6 +106,8 @@ class Summaries():
     # handeled = {'tosdr_annotated':True, 'tldrlegal':True}
 
     def __init__(self, loads=[]):
+        self.mean_ntokens = []
+
         self.items = []
         self.dir_path = os.path.dirname(os.path.realpath(__file__))
         self.files = {}
@@ -89,6 +123,16 @@ class Summaries():
 
         logging.info(f'Loaded {file}')
 
+        self._update_mean_words()
+
+    def _update_mean_words(self):
+        ntokens = []
+        for item in self.items:
+            if item.ref:
+                ntokens.append(item.ref.ntokens)
+
+        self.mean_ntokens = statistics.mean(ntokens)
+
     def check_dir(self, check=None):
         if not check:
             check = self.dir_path
@@ -100,14 +144,14 @@ class Summaries():
         logging.debug(f'Checking {check}')
         logging.debug(', '.join(self.files))
 
-    def textrank(self, use_spacy=False):
+    def textrank(self):
         hypes = []
         refs = []
         refs_dirty = []
         for item in self.items:
             if item.ref:
 
-                if item.quote.nsents(use_spacy) <= 1:
+                if item.quote.nsents <= 1:
                     hypes.append(item.quote.clean)
                     refs.append(item.ref.clean)
                     refs_dirty.append(item.ref.original)
@@ -115,7 +159,7 @@ class Summaries():
                 else:
                     for x in range(2, 11):
                         ratio = x * .1
-                        hyp = summarize("\n ".join(item.quote.sents(use_spacy)), ratio)
+                        hyp = summarize("\n ".join(item.quote.sents), ratio)
                         if len(hyp) > 0:
                             hypes.append(hyp)
                             refs.append(item.ref.clean)
@@ -125,13 +169,13 @@ class Summaries():
 
         return rouge.get_scores(hypes, refs, avg=True)
 
-    def firstsent(self, use_spacy=False):
+    def firstsent(self):
         hypes = []
         refs = []
         refs_dirty = []
         for item in self.items:
             if item.ref:
-                hypes.append(item.quote.sents(use_spacy)[0])
+                hypes.append(item.quote.sents[0])
                 refs.append(item.ref.clean)
 
         return rouge.get_scores(hypes, refs, avg=True)
@@ -141,40 +185,23 @@ class Summaries():
         # sentence and word counts
 
         quote_sentence_counts_nltk = []
-        quote_sentence_counts_spacy = []
         quote_word_counts = []
-        quote_ngrams = []
-        # quote_1grams = []
-        # quote_2grams = []
-        # quote_3grams = []
-        # quote_4grams = []
 
         ref_sentence_counts_nltk = []
-        ref_sentence_counts_spacy = []
         ref_word_counts = []
-        ref_ngrams = []
 
         unique_ngram_counts = np.empty((0, 4))
         ref_ngram_counts = np.empty((0, 4))
 
         unique_sentences_counts_nltk = []
-        unique_sentences_counts_spacy = []
 
-        # ref_1grams = []
-        # ref_2grams = []
-        # ref_3grams = []
-        # ref_4grams = []
         for item in self.items:
             if item.ref:
                 quote_sentence_counts_nltk.append(item.quote.nsents())
-                quote_sentence_counts_spacy.append(item.quote.nsents(use_spacy=True))
                 quote_word_counts.append(item.quote.ntokens)
-                # quote_ngrams.append(item.quote.ngrams)
 
                 ref_sentence_counts_nltk.append(item.ref.nsents())
-                ref_sentence_counts_spacy.append(item.ref.nsents(use_spacy=True))
                 ref_word_counts.append(item.ref.ntokens)
-                # ref_ngrams.append(item.ref.ngrams)
 
                 temp_unique = []
                 temp_ref = []
@@ -186,15 +213,15 @@ class Summaries():
                 ref_ngram_counts = np.vstack((ref_ngram_counts, temp_ref))
 
                 unique_sentences_counts_nltk.append(num_unique(ref=item.ref.sents(), quote=item.quote.sents()))
-                unique_sentences_counts_spacy.append(
-                    num_unique(ref=item.ref.sents(use_spacy=True), quote=item.quote.sents(use_spacy=True)))
 
-        # TODO: print histogram average, etc
+                if item.ref.ntokens/item.quote.ntokens > 2:
+                    print(f'\t {item.ref.ntokens} : {item.ref} \n {item.quote.ntokens} {item.quote} \n ')
 
         # micro, macro ratios
 
+        print(pd.DataFrame(ref_word_counts).describe())
+
         sents_ratio_micro_nltk = sum(ref_sentence_counts_nltk) / sum(quote_sentence_counts_nltk)
-        sents_ratio_micro_spacy = sum(ref_sentence_counts_spacy) / sum(quote_sentence_counts_nltk)
         words_ratio_micro = sum(ref_word_counts) / sum(quote_word_counts)
         unique_ngrams_ratios_micro = sum(unique_ngram_counts) / sum(ref_ngram_counts)
         unique_ratio_array_test = safe_div_array(unique_ngram_counts, ref_ngram_counts)
@@ -202,50 +229,63 @@ class Summaries():
                                      np.shape(unique_ngram_counts)[0]
 
         unique_sentence_ratio_micro_nltk = sum(unique_sentences_counts_nltk) / sum(quote_sentence_counts_nltk)
-        unique_sentence_ratio_micro_spacy = sum(unique_sentences_counts_spacy) / sum(quote_sentence_counts_spacy)
 
-        words_ratio = safe_div_array(ref_word_counts, quote_word_counts)
+        words_ratio = np.divide(ref_word_counts, quote_word_counts)
         sents_ratio_nltk = safe_div_array(ref_sentence_counts_nltk, quote_sentence_counts_nltk)
-        sents_ratio_spacy = safe_div_array(ref_sentence_counts_spacy, quote_sentence_counts_spacy)
         unique_sents_ratio_nltk = safe_div_array(unique_sentences_counts_nltk, ref_sentence_counts_nltk)
-        unique_sents_ratio_spacy = safe_div_array(unique_sentences_counts_spacy, ref_sentence_counts_spacy)
+
+
 
         words_ratio_macro = sum(words_ratio) / len(words_ratio)
         sents_ratio_macro_nltk = sum(sents_ratio_nltk) / len(sents_ratio_nltk)
-        sents_ratio_macro_spacy = sum(sents_ratio_spacy) / len(sents_ratio_spacy)
         unique_sents_ratio_macro_nltk = sum(unique_sents_ratio_nltk) / len(unique_sents_ratio_nltk)
-        unique_sents_ratio_fig1macro_spacy = sum(unique_sents_ratio_spacy) / len(unique_sents_ratio_spacy)
 
-        sents_ratio_macro_spacy = sum(sents_ratio_spacy)
-
-        fig1, ax1 = plt.subplots()
-        ax1.set_title('unique n-grams')
-        ax1.bar(['1gram', '2gram', '3gram', '4gram'], unique_ngrams_ratios_micro)
-        fig1.show()
-
-        fig2, ax2 = plt.subplots()
-
-        ax2.boxplot([quote_sentence_counts_nltk, ref_sentence_counts_nltk], showfliers=False)
-        ax2.set_title('Sentence Counts')
-        ax2.set_xticklabels(['Original Text', 'Reference'])
-        fig2.show()
+        #
+        # fig1, ax1 = plt.subplots()
+        # ax1.set_title('unique n-grams')
+        # ax1.bar(['1gram', '2gram', '3gram', '4gram'], unique_ngrams_ratios_micro)
+        # fig1.show()
+        #
         # fig2, ax2 = plt.subplots()
+        #
+        # ax2.boxplot([quote_sentence_counts_nltk, ref_sentence_counts_nltk], showfliers=False)
         # ax2.set_title('Sentence Counts')
-        # ax2.boxplot()
-        # ax2.xticks(2, ('Original Text','Reference'))
+        # ax2.set_xticklabels(['Original Text', 'Reference'])
         # fig2.show()
+        # # fig2, ax2 = plt.subplots()
+        # # ax2.set_title('Sentence Counts')
+        # # ax2.boxplot()
+        # # ax2.xticks(2, ('Original Text','Reference'))
+        # # fig2.show()
+        #
+        # # plt.boxplot([quote_word_counts, ref_word_counts], showfliers=False)
+        # # plt.title('Word Counts')
+        # # plt.xticks(('Original Text', 'Reference'))
+        # # plt.show()
+        # fig3, ax3 = plt.subplots()
+        # ax3.set_title('Word Counts')
+        # ax3.boxplot([quote_word_counts, ref_word_counts], showfliers=False)
+        # ax3.set_xticklabels(['Original Text', 'Reference'])
+        #
+        # fig3.show()
 
-        # plt.boxplot([quote_word_counts, ref_word_counts], showfliers=False)
-        # plt.title('Word Counts')
-        # plt.xticks(('Original Text', 'Reference'))
-        # plt.show()
-        fig3, ax3 = plt.subplots()
-        ax3.set_title('Word Counts')
-        ax3.boxplot([quote_word_counts, ref_word_counts], showfliers=False)
-        ax3.set_xticklabels(['Original Text', 'Reference'])
 
-        fig3.show()
+        words_ratio[words_ratio > 1.5] = 1.5
+        # [ x for x in words_ratio if (x < 2) else 2 ]
+        # fig4, ax4 = plt.subplots()
+        # ax4.set_title('Word Ratios')
+        # ax4.hist(words_ratio_alt)
+        # fig4.show()
 
+        n, bins, patches = plt.hist(x=words_ratio, bins='auto',
+                                    alpha=0.7, rwidth=0.85)
+        plt.grid(axis='y', alpha=0.75)
+        plt.xlabel('Ratio')
+        plt.ylabel('Frequency')
+        plt.title('Word Ratios')
+        # plt.text(23, 45, r'$\mu=15, b=3$')
+        # maxfreq = n.max()
+        plt.show()
         pass
 
     def log_odds_ratio(self):
@@ -261,6 +301,7 @@ class Summaries():
 
         for item in self.items:
             if item.ref: #skip if no reference summary
+
                 for word, pos in item.ref.tokens_pos:
                     if word.isalpha():
                         if get_wordnet_pos(pos):
@@ -295,41 +336,93 @@ class Summaries():
         # stops = list(stopwords.words('english')).append('us')
 
         for word in all_counts:
-            # if word not in stopwords.words('english'):
-            #     if word != 'us':
-            ref_count = ref_counts[word]
-            quote_count = quote_counts[word]
+            if word not in stopwords.words('english'):
+                if word != 'us':
+                    ref_count = ref_counts[word]
+                    quote_count = quote_counts[word]
 
-            if ref_count + quote_count >= ave_count:
-                ref_prob = ref_count / ref_total
-                quote_prob = quote_count / quote_total
+                    if ref_count + quote_count >= ave_count:
+                        ref_prob = ref_count / ref_total
+                        quote_prob = quote_count / quote_total
 
-                if quote_prob == 0:
-                    quote_prob = .00000000000000000000000000000001
-                    print(f'not in quote {word}')
-                if ref_prob == 0:
-                    ref_prob = .00000000000000000000000000000001
-                    print(f'not in ref {word}')
+                        if quote_prob == 0:
+                            quote_prob = .00000000000000000000000000000001
+                            print(f'not in quote {word}')
+                        if ref_prob == 0:
+                            ref_prob = .00000000000000000000000000000001
+                            print(f'not in ref {word}')
 
-                ratio = ref_prob / quote_prob
-                # print(word, ref_prob, quote_prob, ratio)
+                        ratio = ref_prob / quote_prob
+                        # print(word, ref_prob, quote_prob, ratio)
 
-                log_probs[word] = math.log(ratio)
+                        log_probs[word] = math.log(ratio)
 
-                log_probs_list.append((word, log_probs[word]))
+                        log_probs_list.append((word, log_probs[word]))
 
         log_probs_list = sorted(log_probs_list, key=lambda x: x[1], reverse=True)
         top_ref = log_probs_list[:50]
 
-        print(f'Top 25 reference {top_ref[:][0]}')
+        print(f'Top 50 reference {top_ref}')
+        score = []
+        for word, probs in top_ref:
+            score.append(readability_scores(word))
 
+        scores = pd.DataFrame(score)
+        print(scores.describe())
 
         log_probs_list = sorted(log_probs_list, key=lambda x: x[1])
         top_quote = log_probs_list[:50]
 
-        print(f'Top 25 quote {top_quote}')
+        print(f'Top 50 quote {top_quote}')
+
+        score = []
+        for word, probs in top_quote:
+            score.append(readability_scores(word))
+
+        scores = pd.DataFrame(score)
+        print(scores.describe())
+
 
         pass
+
+    def readibility_score(self):
+        ref_scores = []
+        quote_scores = []
+        for item in self.items:
+            if item.ref: #ski
+                ref_scores.append(readability_scores(item.ref.clean))
+                quote_scores.append(readability_scores(item.quote.clean))
+        print("\n Reference Scores")
+        print(pd.DataFrame(ref_scores).describe())
+        print("\n Quote Scores")
+        print(pd.DataFrame(quote_scores).describe())
+
+    def greedy_kl(self):
+        """ Runs greedy KL on the documents"""
+
+        #scipy.stats.entropy(pk, qk)
+        hypes = []
+        refs = []
+        refs_dirty = []
+        for item in self.items:
+            if item.ref:
+                refs.append(item.ref.clean)
+                #average len of words is 17.3 --
+                if item.quote.ntokens <= self.mean_ntokens:
+                    hypes.append(item.quote)
+                else:
+                    lemmas_by_sentence = item.quote.get_lemmas()
+                    # dist_full_text:
+                    #get distribution for quote
+                    #get distribution for each sentence for each quote
+                    #rank sentences using scipy.stats.entropy(quote, sent)
+
+
+
+
+
+
+        return rouge.get_scores(hypes, refs, avg=True)
 
 
 class Summary:
@@ -337,9 +430,9 @@ class Summary:
     def __init__(self, row, file):
         self.row = row
         self.uid = row['uid']
-        self.quote = Document(row['text'])
+        self.quote = Document(parent=self, text=row['text'])
         if file == "tldrlegal":
-            self.ref = Document(row['summary'])
+            self.ref = Document(parent=self, text=row['summary'])
             self.id = row['id']
             self.title = row['title']
             self.name = row['name']
@@ -348,7 +441,8 @@ class Summary:
             self.urls = row["urls"]
             self.quote_doc = row["quoteDoc"]
             if self.identify_code("1"):
-                self.ref = Document(self.identify_code("1"))
+                key = self.identify_code("1")
+                self.ref = Document(parent=self, text=self.row[key[:-5]], code=self.row[key])
             else:
                 self.ref = False
 
@@ -357,32 +451,37 @@ class Summary:
             if key.endswith('_code'):
                 if x in self.row[key]:
                     # print(key[:-5])
-                    return self.row[key[:-5]]
-
+                    return key #self.row[key[:-5]]
 
 class Document:
 
     def __str__(self):
         return self.clean
 
-    def __init__(self, text, code=None):
+    def __init__(self, parent, text, code=None):
+        self.parent = parent
         self.original = text
         self.clean = self.clean_text()
 
-        self.sents_nltk = self.get_sentences()
-        self.nsents_nltk = len(self.sents_nltk)
-
-        self.sents_spacy = self.get_sentences(use_spacy=True)
-        self.nsents_spacy = len(self.sents_spacy)
+        self.sents = self.get_sentences()
+        self.nsents = len(self.sents)
 
         self.tokens = word_tokenize(self.clean)
         self.tokens_pos = nltk.pos_tag(self.tokens)
         self.ntokens = len(self.tokens)
         self.ngrams = self.get_ngrams()
 
+        self._lemmas_by_sentence = None
+
         self.code = code
 
+        # self.readability = readability_scores(self.clean)
+
     def clean_text(self):
+        """
+        :return: remove spaces, remove n,
+        edit some periods, and spacing around the periods
+        """
         text = self.original
         # print(text)
         for match in re.finditer("\.”", text):
@@ -393,18 +492,42 @@ class Document:
             index = match.start()
             text = text[:index + 2] + " " + text[index + 2:]
 
-        return text.replace('&nbsp', ' ').replace('\n', ' ').lower()
+        return text.replace('&nbsp', ' ').replace('\n', ' ')
 
-    def get_sentences(self, text=None, use_spacy=False):
+
+
+    def get_lemmas(self):
+        """
+        :return: list of list of lemmas
+        """
+        if not self._lemmas_by_sentence:
+            lemmatize = WordNetLemmatizer()
+            all = []
+            for sentence in self.sents:
+                lemmas = []
+                tokens = word_tokenize(sentence)
+                for word, pos in nltk.pos_tag(tokens):
+                    if word.isalpha():
+                        if get_wordnet_pos(pos):
+                            lemma = lemmatize.lemmatize(word.lower(), get_wordnet_pos(pos))
+                        else:
+                            lemma = lemmatize.lemmatize(word.lower())
+                        if lemma not in stopwords.words('english'):
+                            if lemma is "cooky" and word is "cookies":
+                                    lemmas.append("cookies")
+                            elif lemma is not "u":
+                                lemmas.append(lemma)
+                all.append(lemmas)
+            self._lemmas_by_sentence = all
+
+        return self._lemmas_by_sentence
+
+    def get_sentences(self, text=None, ):
 
         if not text:
             text = self.clean
 
-        if use_spacy:
-            tokenized = list(nlp(text).sents)
-            return [sent.text for sent in tokenized]
-        else:
-            return sent_tokenize(text)
+        return sent_tokenize(text)
 
     def get_ngrams(self, tokens=None, num=4):
         """
@@ -418,18 +541,16 @@ class Document:
 
         return grams
 
-    def nsents(self, use_spacy=False):
-        if use_spacy:
-            return self.nsents_spacy
-        else:
-            return self.nsents_nltk
+    def nsents(self):
 
-    def sents(self, use_spacy=False):
-        if use_spacy:
-            return self.sents_spacy
-        else:
-            return self.sents_nltk
+        return self.nsents
+
+    def sents(self):
+
+        return self.sents
+
+
 
 
 if __name__ == '__main__':
-    logging.debug(f'Invoking __init__.py for {__name__}')
+    logging.debug(f'Invoking __main__.py for {__name__}')
