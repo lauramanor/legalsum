@@ -1,0 +1,6 @@
+.idea/
+.ipynb_checkpoints
+.data/DUC2002
+.data/duc2002.tar.gz
+*.png
+__pycache__/
